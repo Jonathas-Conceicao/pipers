@@ -1,7 +1,7 @@
 #![allow(dead_code)]
-use std::process::{Stdio,Command,Child};
-use std::os::unix::io::{FromRawFd, AsRawFd};
 use std::io::{Error, ErrorKind, Result};
+use std::os::unix::io::{AsRawFd, FromRawFd};
+use std::process::{Child, ChildStdout, Command, Stdio};
 
 /// Data structure used to hold processes
 /// and allows for the chaining of commands
@@ -10,7 +10,6 @@ pub struct Pipe {
 }
 
 impl Pipe {
-
     /// Creates a new `Pipe` by taking in a command
     /// as input. An empty string as input will
     /// cause the eventual end of the piping to have
@@ -22,13 +21,13 @@ impl Pipe {
             Some(x) => x,
             None => return pipe_new_error("No command as input"),
         };
-        let args  = split.collect::<Vec<&str>>();
+        let args = split.collect::<Vec<&str>>();
 
         Pipe {
             child: Command::new(command)
-                    .args(args.as_slice())
-                    .stdout(Stdio::piped())
-                    .spawn(),
+                .args(args.as_slice())
+                .stdout(Stdio::piped())
+                .spawn(),
         }
     }
 
@@ -48,17 +47,26 @@ impl Pipe {
             Some(x) => x,
             None => return pipe_new_error("No command as input"),
         };
-        let args  = split.collect::<Vec<&str>>();
-        let stdio = unsafe{ Stdio::from_raw_fd(stdout.as_raw_fd()) };
+        let args = split.collect::<Vec<&str>>();
+        let stdio = unsafe { Stdio::from_raw_fd(stdout.as_raw_fd()) };
 
         Pipe {
             child: Command::new(command)
-                    .args(args.as_slice())
-                    .stdout(Stdio::piped())
-                    .stdin(stdio)
-                    .spawn(),
+                .args(args.as_slice())
+                .stdout(Stdio::piped())
+                .stdin(stdio)
+                .spawn(),
         }
+    }
 
+    /// This can be used take a peek at the stdout for the current pipe.
+    pub fn peek(&self) -> Result<&ChildStdout> {
+        if let Ok(child) = &self.child {
+            if let Some(ref stdout) = child.stdout {
+                return Ok(stdout);
+            }
+        }
+        Err(Error::new(ErrorKind::Other, "No stdout for a command"))
     }
 
     /// Return the `Child` process of the final command that
@@ -66,7 +74,6 @@ impl Pipe {
     pub fn finally(self) -> Result<Child> {
         self.child
     }
-
 }
 
 /// Helper method to generate a new error from a string
@@ -81,20 +88,18 @@ fn pipe_new_error(error: &str) -> Pipe {
 /// Helper method used to pass the error down the chain by creating
 /// a new pipe with the error passed in.
 fn pipe_error(error: Result<Child>) -> Pipe {
-    Pipe {
-        child: error,
-    }
+    Pipe { child: error }
 }
 
 #[test]
 fn test_pipe() {
     let out = Pipe::new("ls /")
-                .then("grep usr")
-                .then("head -c 1")
-                .finally()
-                .expect("Commands did not pipe")
-                .wait_with_output()
-                .expect("failed to wait on child");
+        .then("grep usr")
+        .then("head -c 1")
+        .finally()
+        .expect("Commands did not pipe")
+        .wait_with_output()
+        .expect("failed to wait on child");
 
     assert_eq!("u", &String::from_utf8(out.stdout).unwrap());
 }
